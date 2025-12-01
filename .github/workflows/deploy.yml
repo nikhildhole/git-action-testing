@@ -1,7 +1,5 @@
 name: Deployment Pipeline
 
-run-name: "Deploy ${{ needs.versioning.outputs.TAG || 'calculating...' }}"
-
 on:
   push:
     branches: [main, dev, uat, cug]
@@ -105,6 +103,12 @@ jobs:
             echo "TAG=$TAG"
             echo "TAG=$TAG" >> $GITHUB_ENV
             echo "TAG=$TAG" >> $GITHUB_OUTPUT
+
+
+
+      - id: Set dynamic run name
+        run: |
+          echo "run-name: Deploy ${{ env.TAG }}" >> $GITHUB_ENV
 
 
 
