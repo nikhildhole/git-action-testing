@@ -106,9 +106,15 @@ jobs:
 
 
 
-      - name: Set dynamic run name
+      - name: Update run name to Tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "run-name: Deploy ${{ env.TAG }}" >> $GITHUB_ENV
+          gh api \
+            repos/${{ github.repository }}/actions/runs/${{ github.run_id }} \
+            -X PATCH \
+            -f name="Deploy ${{ env.TAG }}"
+
 
 
 
