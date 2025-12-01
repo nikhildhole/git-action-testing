@@ -1,5 +1,4 @@
 name: Deployment Pipeline
-run-name: Deploy to
 
 on:
   push:
@@ -105,7 +104,9 @@ jobs:
             echo "TAG=$TAG" >> $GITHUB_ENV
             echo "TAG=$TAG" >> $GITHUB_OUTPUT
 
-
+      - id: run_name
+        run: |
+          echo "run-name: Deploy to
 
 
   # ─────────────────────────────────────────────────────────────
