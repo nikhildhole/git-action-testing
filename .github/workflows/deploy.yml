@@ -1,0 +1,168 @@
+name: Deployment Pipeline
+
+on:
+  push:
+    branches: [main, dev, uat, cug]
+  workflow_dispatch:
+    inputs:
+      action_type:
+        description: "Choose rollback or deployment"
+        type: choice
+        required: true
+        default: deployment
+        options:
+          - deployment
+          - rollback
+      canary_percent:
+        description: "Canary % (0-100) - only for deployment"
+        required: false
+        type: number
+        default: 0
+
+permissions:
+  contents: write
+  id-token: write
+
+env:
+  ACR_NAME: youracr.azurecr.io
+  INFRA_REPO: git@github.com:org/infra-repo.git
+  INFRA_FILE_PATH: environments/prod/deployment.yaml
+
+jobs:
+
+  # ─────────────────────────────────────────────────────────────
+  # 1. Calculate Version Tag (Major/Minor/Patch)
+  # ─────────────────────────────────────────────────────────────
+  versioning:
+    runs-on: ubuntu-latest
+    outputs:
+      TAG: ${{ steps.settag.outputs.TAG }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Determine release namespace based on branch
+      - id: branch
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == "main" ]]; then echo "NAMESPACE=prod" >> $GITHUB_ENV; fi
+          if [[ "${GITHUB_REF_NAME}" == "uat" ]]; then echo "NAMESPACE=uat" >> $GITHUB_ENV; fi
+          if [[ "${GITHUB_REF_NAME}" == "cug" ]]; then echo "NAMESPACE=cug" >> $GITHUB_ENV; fi
+          if [[ "${GITHUB_REF_NAME}" == "dev" ]]; then echo "NAMESPACE=dev" >> $GITHUB_ENV; fi
+
+      # Get PR body, detect major/minor/patch
+      - id: semver
+        run: |
+          BODY=$(gh pr view --json body -q '.body' || echo "")
+          
+          if grep -qi "#major" <<< "$BODY"; then echo "BUMP=major" >> $GITHUB_ENV; fi
+          if grep -qi "#minor" <<< "$BODY"; then echo "BUMP=minor" >> $GITHUB_ENV; fi
+          if grep -qi "#patch" <<< "$BODY"; then echo "BUMP=patch" >> $GITHUB_ENV; fi
+
+          if [[ -z "$BUMP" ]]; then echo "BUMP=patch" >> $GITHUB_ENV; fi
+
+      # Generate version tag
+      - id: settag
+        run: |
+          VERSION=$(git describe --tags --abbrev=0 || echo "0.0.0")
+
+          new_version=$(npx semver $VERSION -i $BUMP)
+          TAG="${NAMESPACE}-${new_version}"
+
+          echo "TAG=$TAG"
+          echo "TAG=$TAG" >> $GITHUB_ENV
+          echo "::set-output name=TAG::$TAG"
+
+  # ─────────────────────────────────────────────────────────────
+  # 2. Auto-run on Push → Build & Push Image Only
+  # ─────────────────────────────────────────────────────────────
+  auto_deploy:
+    needs: versioning
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Docker login
+        run: |
+          az acr login --name ${{ env.ACR_NAME }}
+
+      - name: Build & Push Image
+        run: |
+          IMAGE="${{ env.ACR_NAME }}/service:${{ needs.versioning.outputs.TAG }}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+
+  # ─────────────────────────────────────────────────────────────
+  # 3. Manual Run → Deployment or Rollback
+  # ─────────────────────────────────────────────────────────────
+  manual_ops:
+    needs: versioning
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Restrict manual trigger to specific users
+      - name: Validate Manual Trigger User
+        run: |
+          allowed=("user1" "user2" "devops")
+          if [[ ! " ${allowed[@]} " =~ " ${GITHUB_ACTOR} " ]]; then
+            echo "❌ User ${GITHUB_ACTOR} not allowed."
+            exit 1
+          fi
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # Check if tag exists in ACR
+      - id: check_image
+        run: |
+          exists=$(az acr repository show-tags \
+            --name ${{ env.ACR_NAME }} \
+            --repository service \
+            --query "[?contains(@,'${{ needs.versioning.outputs.TAG }}')]" -o tsv)
+          
+          if [[ -z "$exists" ]]; then
+            echo "❌ Image tag not found in ACR"
+            exit 1
+          fi
+
+      # Clone Infra Repo
+      - name: Clone Infra Repo
+        run: |
+          git clone $INFRA_REPO infra
+          cd infra
+          git config user.email "devops@company.com"
+          git config user.name "Automation Bot"
+
+      # Rollback flow
+      - name: Apply Rollback
+        if: ${{ github.event.inputs.action_type == 'rollback' }}
+        run: |
+          cd infra
+          yq e ".image.tag = \"${{ needs.versioning.outputs.TAG }}\"" -i $INFRA_FILE_PATH
+          git add .
+          git commit -m "Rollback to tag ${{ needs.versioning.outputs.TAG }}"
+          git push origin main
+
+      # Deployment flow + canary
+      - name: Apply Deployment
+        if: ${{ github.event.inputs.action_type == 'deployment' }}
+        run: |
+          cd infra
+          yq e ".image.tag = \"${{ needs.versioning.outputs.TAG }}\"" -i $INFRA_FILE_PATH
+          yq e ".traffic.canary = ${GITHUB_EVENT_INPUTS_canary_percent}" -i $INFRA_FILE_PATH
+          git add .
+          git commit -m "Deploy ${{ needs.versioning.outputs.TAG }} with canary ${{ github.event.inputs.canary_percent }}%"
+          git push origin main
