@@ -1,5 +1,7 @@
 name: Deployment Pipeline
 
+run-name: "Deploy ${{ needs.versioning.outputs.TAG || 'calculating...' }}"
+
 on:
   push:
     branches: [main, dev, uat, cug]
