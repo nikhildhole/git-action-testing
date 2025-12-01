@@ -1,4 +1,5 @@
 name: Deployment Pipeline
+run-name: Deploy to
 
 on:
   push:
@@ -103,17 +104,6 @@ jobs:
             echo "TAG=$TAG"
             echo "TAG=$TAG" >> $GITHUB_ENV
             echo "TAG=$TAG" >> $GITHUB_OUTPUT
-
-
-
-      - name: Update run name to Tag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh api \
-            repos/${{ github.repository }}/actions/runs/${{ github.run_id }} \
-            -X PATCH \
-            -f name="Deploy ${{ env.TAG }}"
 
 
 
