@@ -57,24 +57,55 @@ jobs:
       - id: semver
         run: |
           BODY=$(gh pr view --json body -q '.body' || echo "")
-          
-          if grep -qi "#major" <<< "$BODY"; then echo "BUMP=major" >> $GITHUB_ENV; fi
-          if grep -qi "#minor" <<< "$BODY"; then echo "BUMP=minor" >> $GITHUB_ENV; fi
-          if grep -qi "#patch" <<< "$BODY"; then echo "BUMP=patch" >> $GITHUB_ENV; fi
+          FIRST_LINE=$(echo "$BODY" | sed -n '1p' | tr '[:upper:]' '[:lower:]')
 
-          if [[ -z "$BUMP" ]]; then echo "BUMP=patch" >> $GITHUB_ENV; fi
+          if [[ "$FIRST_LINE" == feature* ]]; then
+            BUMP="feature"
+          elif [[ "$FIRST_LINE" == breaking\ change* ]]; then
+            BUMP="minor"
+          else
+            BUMP="patch"
+          fi
+
+          echo "Detected bump: $BUMP"
+          echo "BUMP=$BUMP" >> $GITHUB_ENV
+
 
       # Generate version tag
       - id: settag
         run: |
-          VERSION=$(git describe --tags --abbrev=0 || echo "0.0.0")
+            # Try to get last tag; if none, start at v.0.0.0
+            RAW_VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "v1.0.0.0")
+            VERSION=${RAW_VERSION#v}
 
-          new_version=$(npx semver $VERSION -i $BUMP)
-          TAG="${NAMESPACE}-${new_version}"
+            IFS='.' read -r MAJOR MINOR FEATURE PATCH <<< "$VERSION"
 
-          echo "TAG=$TAG"
-          echo "TAG=$TAG" >> $GITHUB_ENV
-          echo "TAG=$TAG" >> "$GITHUB_OUTPUT"
+            echo "Current version: $MAJOR.$MINOR.$FEATURE.$PATCH"
+            echo "Bump: $BUMP"
+
+            case "$BUMP" in
+              feature)
+                FEATURE=$((FEATURE + 1))
+                PATCH=0
+                ;;
+              minor)
+                MINOR=$((MINOR + 1))
+                FEATURE=0
+                PATCH=0
+                ;;
+              patch)
+                PATCH=$((PATCH + 1))
+                ;;
+            esac
+
+            NEW_VERSION="v${MAJOR}.${MINOR}.${FEATURE}.${PATCH}"
+
+            TAG="${NAMESPACE}-${NEW_VERSION}"
+
+            echo "TAG=$TAG"
+            echo "TAG=$TAG" >> $GITHUB_ENV
+            echo "TAG=$TAG" >> $GITHUB_OUTPUT
+
 
 
   # ─────────────────────────────────────────────────────────────
