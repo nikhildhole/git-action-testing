@@ -106,7 +106,7 @@ jobs:
 
 
 
-      - id: Set dynamic run name
+      - name: Set dynamic run name
         run: |
           echo "run-name: Deploy ${{ env.TAG }}" >> $GITHUB_ENV
 
