@@ -104,11 +104,6 @@ jobs:
             echo "TAG=$TAG" >> $GITHUB_ENV
             echo "TAG=$TAG" >> $GITHUB_OUTPUT
 
-      - id: run_name
-        run: |
-          echo "run-name: Deploy to
-
-
   # ─────────────────────────────────────────────────────────────
   # 2. Auto-run on Push → Build & Push Image Only
   # ─────────────────────────────────────────────────────────────
